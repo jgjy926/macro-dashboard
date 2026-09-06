@@ -116,6 +116,7 @@ def build(conn, *, retrain: bool = False, as_of: str | None = None,
     rec = recommend.build(R, F, f12, conf, composite, health)
 
     variables = engine.all_variables() if run_type != "quick" else {}
+    _bt = backtest_engine.latest_backtest_summary(conn)
 
     # -- assemble -------------------------------------------------------------
     snap = {
@@ -252,10 +253,15 @@ def build(conn, *, retrain: bool = False, as_of: str | None = None,
         # The last stored vintage-true backtest. Read, never recomputed: a daily
         # run must not spend twenty minutes re-deriving it, and must not show an
         # empty Model Performance panel either.
-        "backtest": backtest_engine.latest_backtest_summary(conn),
+        "backtest": _bt,
         # Spec 26's "historical probability line": the vintage-true backtest
         # path, NOT today's model replayed over revised history.
-        "recession_history": backtest_engine.probability_history(conn, 12),
+        #
+        # Falls back to the summary's own copy for the same reason the summary
+        # itself does -- a CI runner holds no vintage store, so the database
+        # query comes back empty there and only the committed JSON has the path.
+        "recession_history": (backtest_engine.probability_history(conn, 12)
+                              or (_bt or {}).get("probability_history") or []),
         "runs": runlog.latest_runs(conn, 10),
     }
 
