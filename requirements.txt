@@ -1,0 +1,20 @@
+# Zero-Cost Macro Forecasting Engine
+#
+# Deliberately small. Everything here is free and open source; there is no paid
+# data vendor, no paid AI/ML API, and no hosted service in the dependency list.
+#
+# Note what is NOT here: no HTTP client library (urllib from the standard library
+# is enough for a keyless CSV endpoint), no ORM (sqlite3 is in the standard
+# library), no plotting library (the dashboard draws its own inline SVG), and no
+# web framework (the front end is static files).
+
+pandas>=2.2            # series alignment, resampling, expanding windows
+numpy>=1.26            # array maths
+scikit-learn>=1.4      # logistic regression, RF, GBM, isotonic calibration, AUC
+scipy>=1.11            # probit MLE (normal CDF link) and optimisation
+python-dotenv>=1.0     # optional .env loading; the engine works without it
+pytest>=8.0            # test suite
+
+# Optional: only if you switch the vintage store to Parquet for a larger grid.
+# The SQLite path is the default and needs nothing extra.
+# pyarrow>=15.0

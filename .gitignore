@@ -1,0 +1,31 @@
+# Secrets — never commit (spec 32)
+.env
+
+# Local data store. The database is rebuildable from public sources
+# (`python tools/backfill.py`), and the vintage table alone runs to ~1M rows,
+# so it is regenerated rather than versioned.
+*.db
+*.db-wal
+*.db-shm
+data_cache/
+logs/
+
+# Generated outputs. data/macro_engine.json is written by every run; the copy the
+# dashboard actually serves lives in the dashboard repo.
+data/*.json
+data/*.json.tmp
+data/*.txt
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
