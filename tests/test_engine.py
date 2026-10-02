@@ -698,3 +698,72 @@ def test_climatology_beats_a_biased_constant_prior():
     rows = _rec_rows(["2000-01", "2008-01", "2020-01"])
     estimated = calibration.empirical_base_rate(rows, 12, "2026-01-15")
     assert estimated < st.HORIZON_BASE_RATE[12] * 1.5
+
+
+# ---------------------------------------------------------------------------
+# model cache: reusing last month's fit while the refit runs elsewhere
+# ---------------------------------------------------------------------------
+def _cache_engine(month: str, cols=("a", "b")):
+    """A ForecastEngine with only the cache-relevant state, no fitting."""
+    import pandas as pd
+    from modules import forecast
+    eng = object.__new__(forecast.ForecastEngine)
+    eng.X = pd.DataFrame({c: [0.0] for c in cols}, index=[pd.Timestamp(f"{month}-01")])
+    eng.use_cache, eng.retrained, eng.stale_model_month = True, False, None
+    eng._wf, eng._selected, eng._calibrators = {12: {}}, {12: ("rule", "")}, {}
+    eng._fitted = {12: "fit"}
+    eng._cache_key = eng._compute_cache_key()
+    eng._static_key = eng._compute_cache_key(with_month=False)
+    return eng
+
+
+@pytest.fixture
+def cache_paths(tmp_path, monkeypatch):
+    from config import settings
+    from modules import forecast
+    monkeypatch.setattr(forecast, "CACHE_PATH", tmp_path / "model_cache.pkl")
+    monkeypatch.setattr(settings, "RETRAIN_MARKER", tmp_path / "RETRAIN_NEEDED")
+    return tmp_path
+
+
+def _reload(eng):
+    eng._wf, eng._selected, eng._calibrators, eng._fitted = {}, {}, {}, {}
+    eng._load_cache()
+    return eng
+
+
+def test_new_month_retrains_by_default(cache_paths, monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "ALLOW_STALE_MODEL", False)
+    _cache_engine("2026-09").save_cache()
+    eng = _reload(_cache_engine("2026-10"))
+    assert eng._fitted == {} and eng.stale_model_month is None
+    assert not (cache_paths / "RETRAIN_NEEDED").exists()
+
+
+def test_new_month_reuses_last_fit_when_allowed_and_flags_it(cache_paths, monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "ALLOW_STALE_MODEL", True)
+    _cache_engine("2026-09").save_cache()
+    eng = _reload(_cache_engine("2026-10"))
+    assert eng._fitted == {12: "fit"} and eng.stale_model_month == "2026-09"
+    assert (cache_paths / "RETRAIN_NEEDED").read_text() == "2026-10"
+    # ...and the stale fit is never re-saved as this month's
+    eng.save_cache()
+    monkeypatch.setattr(settings, "ALLOW_STALE_MODEL", False)
+    assert _reload(_cache_engine("2026-10"))._fitted == {}
+
+
+def test_feature_change_is_never_reused(cache_paths, monkeypatch):
+    from config import settings
+    monkeypatch.setattr(settings, "ALLOW_STALE_MODEL", True)
+    _cache_engine("2026-09").save_cache()
+    eng = _reload(_cache_engine("2026-10", cols=("a", "b", "c")))
+    assert eng._fitted == {} and eng.stale_model_month is None
+
+
+def test_fresh_save_clears_the_retrain_marker(cache_paths, monkeypatch):
+    from config import settings
+    (cache_paths / "RETRAIN_NEEDED").write_text("2026-10")
+    _cache_engine("2026-10").save_cache()
+    assert not (cache_paths / "RETRAIN_NEEDED").exists()

@@ -124,12 +124,14 @@ class ForecastEngine:
         self._fitted: dict[int, models.FittedModel] = {}
         self.use_cache = use_cache
         self.retrained = False
+        self.stale_model_month: str | None = None   # set when last month's fit is reused
         self._cache_key = self._compute_cache_key()
+        self._static_key = self._compute_cache_key(with_month=False)
         if use_cache and not retrain:
             self._load_cache()
 
     # -- fit cache --------------------------------------------------------
-    def _compute_cache_key(self) -> str:
+    def _compute_cache_key(self, with_month: bool = True) -> str:
         """Identify a fit by what it was TRAINED on, not by every input byte.
 
         The first version hashed the whole feature matrix, which meant any change
@@ -157,8 +159,15 @@ class ForecastEngine:
         h.update(f"{settings.MODEL_VERSION}|{settings.FEATURE_VERSION}".encode())
         # Training month, not the newest observation date: within a calendar
         # month the fitted model is unchanged and only the inputs it scores move.
-        h.update(str(self.X.index[-1])[:7].encode())
+        # `with_month=False` is the same fit identity minus the month -- what
+        # decides whether last month's fit may stand in (ALLOW_STALE_MODEL).
+        if with_month:
+            h.update(self.training_month.encode())
         return h.hexdigest()[:16]
+
+    @property
+    def training_month(self) -> str:
+        return "" if self.X.empty else str(self.X.index[-1])[:7]
 
     def _load_cache(self) -> None:
         try:
@@ -167,9 +176,25 @@ class ForecastEngine:
             with open(CACHE_PATH, "rb") as f:
                 blob = pickle.load(f)
             if blob.get("key") != self._cache_key:
-                log_info("[forecast] model cache stale (new training month, or the "
-                         "feature set / model version changed) -- will retrain")
-                return
+                # Same features and versions, only an older month: under
+                # ALLOW_STALE_MODEL score with it now and leave the refit to the
+                # separate retrain job. Old caches carry no static_key and so
+                # always refit -- the safe default.
+                if (settings.ALLOW_STALE_MODEL and blob.get("static_key")
+                        and blob["static_key"] == self._static_key):
+                    self.stale_model_month = blob.get("month") or "unknown"
+                    log_warning(f"[forecast] model cache is from {self.stale_model_month}, "
+                                f"data is now {self.training_month}: reusing it for this run "
+                                f"(MACRO_ALLOW_STALE_MODEL) and flagging a retrain")
+                    try:
+                        settings.RETRAIN_MARKER.parent.mkdir(parents=True, exist_ok=True)
+                        settings.RETRAIN_MARKER.write_text(self.training_month, encoding="utf-8")
+                    except OSError as e:
+                        log_warning(f"[forecast] could not write retrain marker: {e}")
+                else:
+                    log_info("[forecast] model cache stale (new training month, or the "
+                             "feature set / model version changed) -- will retrain")
+                    return
             self._wf = blob["wf"]
             self._selected = blob["selected"]
             self._calibrators = blob["calibrators"]
@@ -180,14 +205,19 @@ class ForecastEngine:
             self._wf, self._selected, self._calibrators, self._fitted = {}, {}, {}, {}
 
     def save_cache(self) -> None:
-        if not self.use_cache or not self._fitted:
+        # A reused stale fit must never be re-saved under THIS month's key: that
+        # would launder last month's model into a "fresh" one and the refit
+        # would never happen.
+        if not self.use_cache or not self._fitted or self.stale_model_month:
             return
         try:
             CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
             with open(CACHE_PATH, "wb") as f:
-                pickle.dump({"key": self._cache_key, "wf": self._wf,
+                pickle.dump({"key": self._cache_key, "static_key": self._static_key,
+                             "month": self.training_month, "wf": self._wf,
                              "selected": self._selected, "calibrators": self._calibrators,
                              "fitted": self._fitted}, f)
+            settings.RETRAIN_MARKER.unlink(missing_ok=True)
         except Exception as e:
             log_warning(f"[forecast] could not write model cache: {e}")
 

@@ -35,6 +35,15 @@ DASHBOARD_FEED = DASHBOARD_DIR / "data" / "macro_engine.json"
 MODEL_VERSION = "macro-v1.0.0"
 FEATURE_VERSION = "features-v1.0.0"
 
+# When a new training month starts, a daily run may keep scoring with LAST
+# month's fitted models instead of paying the ~4-5 minute refit inline. The
+# models are flagged as stale (meta.model_stale + RETRAIN_MARKER) and the
+# refit runs separately -- see the dashboard repo's refresh workflow. Never
+# reused across a feature-set or model-version change: those are different
+# models, not older ones.
+ALLOW_STALE_MODEL = os.environ.get("MACRO_ALLOW_STALE_MODEL", "") == "1"
+RETRAIN_MARKER = CACHE_DIR / "RETRAIN_NEEDED"
+
 # --- Timezone -------------------------------------------------------------
 # US macro releases are stamped in US Eastern; the engine's "today" must follow
 # the data calendar, not the operator's laptop locale, or a run from Malaysia

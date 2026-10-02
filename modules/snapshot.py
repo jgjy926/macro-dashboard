@@ -128,6 +128,9 @@ def build(conn, *, retrain: bool = False, as_of: str | None = None,
             "feature_version": settings.FEATURE_VERSION,
             "run_type": run_type,
             "retrained": engine.retrained,
+            # Month of the fit being scored, when it is last month's (the refit
+            # runs separately); None when the models are current.
+            "model_stale_from": engine.stale_model_month,
             "series_count": len(cat.ALL_SERIES),
             "data_note": ("All data from free, keyless public sources (FRED, ALFRED, BLS). "
                           "Freshness reflects the DATA date, not the fetch date."),
