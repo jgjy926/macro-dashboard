@@ -277,3 +277,16 @@ def test_health_summary_shape(conn):
     assert 0.0 <= h["health"] <= 1.0
     assert h["n"] == len(cat.ALL_SERIES)
     assert h["high"] + h["medium"] + h["low"] == h["n"]
+
+
+def test_umich_is_not_stale_while_fred_embargoes_the_next_print():
+    """FRED holds UMich back a month: on 23 Oct the newest point was still
+    August (83d old), one day past the old 82d limit, with September due on
+    FRED that week. The window must cover that; a dead feed must still flag."""
+    for sid in ("UMCSENT", "MICH"):
+        spec = cat.BY_ID[sid]
+        # freshness reads only the newest date, so one row pins the age exactly
+        on_time = [((date.today() - timedelta(days=95)).isoformat(), 50.0)]
+        assert not quality.calculate_data_freshness(on_time, spec)[1], sid
+        dead = [((date.today() - timedelta(days=130)).isoformat(), 50.0)]
+        assert quality.calculate_data_freshness(dead, spec)[1], sid

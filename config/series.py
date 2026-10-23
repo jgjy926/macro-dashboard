@@ -30,6 +30,10 @@ rather than being folded into a good/bad score. See INFLATION_NOTE below.
 `expected_lag_days` typical publication lag after the observation period ends.
     Used by the quality engine for staleness and by the vintage controller to
     simulate release timing for series ALFRED has no vintages for.
+`feed_delay_days` extra days FRED holds a series back AFTER the source has
+    published it (staleness only). UMich asks FRED to delay its surveys by a
+    month, so the September print lands on FRED in late October; the backtest
+    keeps expected_lag_days, which is when the market actually saw the number.
 `vintage`  "alfred"  -> pull true historical vintages from ALFRED (revised hard)
            "final"   -> never revised (market prices, rates, spreads); the
                         real-time value IS the final value, so a vintage pull
@@ -70,6 +74,7 @@ class Series:
     unit: str = ""
     core: bool = False            # part of the reduced feature set the models use
     note: str = ""
+    feed_delay_days: int = 0      # see module docstring; staleness only
 
     @property
     def candidates(self) -> tuple[str, ...]:
@@ -77,11 +82,18 @@ class Series:
 
 
 def _s(sid, label, category, freq, direction, role, transform, lag, vintage,
-       unit="", core=False, fred_ids=(), source="FRED", note="") -> Series:
+       unit="", core=False, fred_ids=(), source="FRED", note="", feed_delay_days=0) -> Series:
     return Series(sid=sid, label=label, category=category, freq=freq,
                   direction=direction, role=role, transform=transform,
                   expected_lag_days=lag, vintage=vintage, unit=unit, core=core,
-                  fred_ids=tuple(fred_ids), source=source, note=note)
+                  fred_ids=tuple(fred_ids), source=source, note=note,
+                  feed_delay_days=feed_delay_days)
+
+
+# FRED posts UMich ~25d after the month ends (e.g. August on 25 Sep) against
+# ~10d at the source, so on the old 82d limit both series went stale for a few
+# days every month while the next print sat in FRED's embargo.
+UMICH_FRED_DELAY = 15
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +136,8 @@ CONSUMER = [
     _s("PSAVERT", "Personal Savings Rate", "consumer", "monthly", +1, "LEADING", "level", 30, "alfred", "%",
        note="Ambiguous alone -- a FALLING rate can mean confidence or distress -- so "
             "modules/factors.py reads it jointly with real income growth."),
-    _s("UMCSENT", "Consumer Sentiment (UMich)", "consumer", "monthly", +1, "LEADING", "level", 10, "lag", "index", core=True),
+    _s("UMCSENT", "Consumer Sentiment (UMich)", "consumer", "monthly", +1, "LEADING", "level", 10, "lag", "index", core=True,
+       feed_delay_days=UMICH_FRED_DELAY),
     _s("TOTALSL", "Consumer Credit Outstanding", "consumer", "monthly", +1, "LAGGING", "yoy", 37, "lag", "$bn"),
     _s("ALTSALES", "Light Vehicle Sales", "consumer", "monthly", +1, "LEADING", "yoy3", 3, "lag", "mn saar", core=True,
        note="Big-ticket credit-financed purchase -- turns early in a consumer downturn."),
@@ -260,7 +273,8 @@ INFLATION = [
     _s("T10YIE", "10Y Breakeven Inflation", "inflation", "daily", 0, "LEADING", "level", 1, "final", "%", core=True),
     _s("T5YIFR", "5y5y Forward Inflation", "inflation", "daily", 0, "LEADING", "level", 1, "final", "%", core=True,
        note="Market-implied long-run expectations -- the anchor the Fed watches."),
-    _s("MICH", "UMich 1Y Inflation Expectations", "inflation", "monthly", 0, "LEADING", "level", 10, "lag", "%"),
+    _s("MICH", "UMich 1Y Inflation Expectations", "inflation", "monthly", 0, "LEADING", "level", 10, "lag", "%",
+       feed_delay_days=UMICH_FRED_DELAY),
 ]
 
 # ---------------------------------------------------------------------------

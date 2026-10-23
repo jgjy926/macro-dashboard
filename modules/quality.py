@@ -65,8 +65,9 @@ _PERIOD_DAYS = {"daily": 1, "weekly": 7, "monthly": 31, "quarterly": 92}
 def expected_gap_days(spec: cat.Series) -> int:
     """Days that may pass between the newest observation DATE and today before
     the series is late. It is the publication lag plus one period, because on
-    any given day the most recent period may simply not have ended yet."""
-    return spec.expected_lag_days + _PERIOD_DAYS.get(spec.freq, 31)
+    any given day the most recent period may simply not have ended yet. A
+    series FRED holds back after release (UMich) also gets that delay."""
+    return spec.expected_lag_days + spec.feed_delay_days + _PERIOD_DAYS.get(spec.freq, 31)
 
 
 # ---------------------------------------------------------------------------
